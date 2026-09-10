@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { validateTask } from '../utils/taskValidation';
 
 /**
- * TaskForm Component
- * Reusable modal form for both Adding and Editing tasks.
- * Validates required fields (Title and Due Date).
+ * TaskForm Component — Phase 2
+ * Modal form for creating and editing tasks with full input validation and keyboard accessibility.
  */
 export default function TaskForm({ isOpen, onClose, onSubmit, initialTask = null }) {
   const isEditMode = Boolean(initialTask && initialTask.id);
@@ -17,7 +17,7 @@ export default function TaskForm({ isOpen, onClose, onSubmit, initialTask = null
 
   const titleInputRef = useRef(null);
 
-  // Sync form inputs when modal opens or initialTask changes
+  // Sync form state on open or when initialTask changes
   useEffect(() => {
     if (isOpen) {
       if (initialTask) {
@@ -26,22 +26,21 @@ export default function TaskForm({ isOpen, onClose, onSubmit, initialTask = null
         setPriority(initialTask.priority || 'Medium');
         setDueDate(initialTask.dueDate || '');
       } else {
-        // Reset to default for new task
         setTitle('');
         setDescription('');
         setPriority('Medium');
-        // Default due date to today or empty: Let user pick, or leave blank to require picking
         setDueDate('');
       }
       setErrors({});
       setIsTouched({ title: false, dueDate: false });
 
       // Focus title input on modal open
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (titleInputRef.current) {
           titleInputRef.current.focus();
         }
-      }, 50);
+      }, 60);
+      return () => clearTimeout(timer);
     }
   }, [isOpen, initialTask]);
 
@@ -58,40 +57,29 @@ export default function TaskForm({ isOpen, onClose, onSubmit, initialTask = null
 
   if (!isOpen) return null;
 
-  // Validate form fields
-  const validate = () => {
-    const newErrors = {};
-
-    if (!title.trim()) {
-      newErrors.title = 'Task title is required.';
-    } else if (title.trim().length < 2) {
-      newErrors.title = 'Title must be at least 2 characters long.';
-    }
-
-    if (!dueDate) {
-      newErrors.dueDate = 'Due date is required.';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
   const handleSubmit = (e) => {
     e.preventDefault();
     setIsTouched({ title: true, dueDate: true });
 
-    if (!validate()) {
-      return;
-    }
-
     const taskPayload = {
-      title: title.trim(),
-      description: description.trim(),
+      title,
+      description,
       priority,
       dueDate,
     };
 
-    onSubmit(taskPayload);
+    const validation = validateTask(taskPayload);
+    if (!validation.isValid) {
+      setErrors(validation.errors);
+      return;
+    }
+
+    onSubmit({
+      title: title.trim(),
+      description: description.trim(),
+      priority,
+      dueDate: dueDate.trim(),
+    });
   };
 
   const handleTitleChange = (e) => {
@@ -127,7 +115,7 @@ export default function TaskForm({ isOpen, onClose, onSubmit, initialTask = null
             type="button"
             className="modal-close-btn"
             onClick={onClose}
-            aria-label="Close dialog"
+            aria-label="Close modal dialog"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"/>
@@ -140,13 +128,19 @@ export default function TaskForm({ isOpen, onClose, onSubmit, initialTask = null
           <div className="modal-body">
             {/* Task Title */}
             <div className="form-group">
-              <label htmlFor="task-title-input" className="form-label">
-                Task Title <span className="required-star">*</span>
-              </label>
+              <div className="form-label-row">
+                <label htmlFor="task-title-input" className="form-label">
+                  Task Title <span className="required-star" aria-hidden="true">*</span>
+                </label>
+                <span className="char-counter" aria-live="polite">
+                  {title.length}/120
+                </span>
+              </div>
               <input
                 id="task-title-input"
                 ref={titleInputRef}
                 type="text"
+                maxLength={120}
                 className={`form-input ${errors.title ? 'has-error' : ''}`}
                 placeholder="e.g. Implement user authentication flow"
                 value={title}
@@ -158,7 +152,7 @@ export default function TaskForm({ isOpen, onClose, onSubmit, initialTask = null
               />
               {errors.title && (
                 <div id="title-error" className="error-message" role="alert">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <circle cx="12" cy="12" r="10"/>
                     <line x1="12" y1="8" x2="12" y2="12"/>
                     <line x1="12" y1="16" x2="12.01" y2="16"/>
@@ -171,12 +165,12 @@ export default function TaskForm({ isOpen, onClose, onSubmit, initialTask = null
             {/* Description */}
             <div className="form-group">
               <label htmlFor="task-desc-input" className="form-label">
-                Description <span style={{ color: 'var(--slate-400)', fontWeight: 400 }}>(Optional)</span>
+                Description <span className="form-optional-tag">(Optional)</span>
               </label>
               <textarea
                 id="task-desc-input"
                 className="form-textarea"
-                placeholder="Add context, acceptance criteria, or relevant links..."
+                placeholder="Add context, acceptance criteria, or notes..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
@@ -185,8 +179,8 @@ export default function TaskForm({ isOpen, onClose, onSubmit, initialTask = null
 
             {/* Priority Selection */}
             <div className="form-group">
-              <label className="form-label">Priority Level</label>
-              <div className="priority-selector" role="radiogroup" aria-label="Task Priority">
+              <label className="form-label" id="priority-group-label">Priority Level</label>
+              <div className="priority-selector" role="radiogroup" aria-labelledby="priority-group-label">
                 {['Low', 'Medium', 'High'].map((p) => {
                   const pLower = p.toLowerCase();
                   const isSelected = priority === p;
@@ -209,7 +203,7 @@ export default function TaskForm({ isOpen, onClose, onSubmit, initialTask = null
             {/* Due Date */}
             <div className="form-group">
               <label htmlFor="task-duedate-input" className="form-label">
-                Due Date <span className="required-star">*</span>
+                Due Date <span className="required-star" aria-hidden="true">*</span>
               </label>
               <input
                 id="task-duedate-input"
@@ -224,7 +218,7 @@ export default function TaskForm({ isOpen, onClose, onSubmit, initialTask = null
               />
               {errors.dueDate && (
                 <div id="duedate-error" className="error-message" role="alert">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <circle cx="12" cy="12" r="10"/>
                     <line x1="12" y1="8" x2="12" y2="12"/>
                     <line x1="12" y1="16" x2="12.01" y2="16"/>

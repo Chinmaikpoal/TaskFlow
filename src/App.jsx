@@ -1,10 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import SearchBar from './components/SearchBar';
 import FilterBar from './components/FilterBar';
 import TaskList from './components/TaskList';
 import TaskForm from './components/TaskForm';
+import useLocalStorage from './hooks/useLocalStorage';
+import { filterTasks, calculateFilterCounts } from './utils/taskFilters';
+import { sortTasks } from './utils/taskSorting';
 
 // Initial seed tasks for fresh users
 const INITIAL_TASKS = [
@@ -15,7 +18,7 @@ const INITIAL_TASKS = [
     priority: 'High',
     dueDate: '2026-09-10',
     completed: true,
-    createdAt: new Date('2026-09-08').toISOString(),
+    createdAt: new Date('2026-09-08T09:00:00Z').toISOString(),
   },
   {
     id: 'seed-2',
@@ -24,7 +27,7 @@ const INITIAL_TASKS = [
     priority: 'High',
     dueDate: '2026-09-12',
     completed: true,
-    createdAt: new Date('2026-09-08').toISOString(),
+    createdAt: new Date('2026-09-08T11:30:00Z').toISOString(),
   },
   {
     id: 'seed-3',
@@ -33,7 +36,7 @@ const INITIAL_TASKS = [
     priority: 'High',
     dueDate: '2026-09-15',
     completed: false,
-    createdAt: new Date('2026-09-09').toISOString(),
+    createdAt: new Date('2026-09-09T14:00:00Z').toISOString(),
   },
   {
     id: 'seed-4',
@@ -42,7 +45,7 @@ const INITIAL_TASKS = [
     priority: 'Medium',
     dueDate: '2026-09-18',
     completed: false,
-    createdAt: new Date('2026-09-09').toISOString(),
+    createdAt: new Date('2026-09-09T16:45:00Z').toISOString(),
   },
   {
     id: 'seed-5',
@@ -51,7 +54,7 @@ const INITIAL_TASKS = [
     priority: 'Low',
     dueDate: '2026-09-22',
     completed: false,
-    createdAt: new Date('2026-09-09').toISOString(),
+    createdAt: new Date('2026-09-09T18:15:00Z').toISOString(),
   },
 ];
 
@@ -61,43 +64,24 @@ export default function App() {
   // ---------------------------------------------------------------------------
   // 1. STATE MANAGEMENT
   // ---------------------------------------------------------------------------
-  // Load tasks from LocalStorage or seed defaults
-  const [tasks, setTasks] = useState(() => {
-    try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch (err) {
-      console.error('Failed to parse tasks from localStorage:', err);
-    }
-    return INITIAL_TASKS;
-  });
+  // Load tasks using custom hook with persistent localStorage synchronization
+  const [tasks, setTasks] = useLocalStorage(LOCAL_STORAGE_KEY, INITIAL_TASKS);
 
+  // Search & Filter state (Phase 2: Status, Priority, Search, and Sort work simultaneously)
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');       // 'all' | 'pending' | 'completed'
+  const [priorityFilter, setPriorityFilter] = useState('all');   // 'all' | 'high' | 'medium' | 'low'
+  const [sortBy, setSortBy] = useState('newest');               // 'newest' | 'oldest' | 'dueDate' | 'priority'
 
   // Modal states
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [deleteConfirmTask, setDeleteConfirmTask] = useState(null);
 
-  // Toast notifications
+  // Toast notifications state
   const [toast, setToast] = useState(null);
 
-  // ---------------------------------------------------------------------------
-  // 2. LOCAL STORAGE PERSISTENCE
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(tasks));
-    } catch (err) {
-      console.error('Failed to save tasks to localStorage:', err);
-    }
-  }, [tasks]);
-
-  // Toast Auto-Dismiss
+  // Toast auto-dismiss after 3.5 seconds
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => {
@@ -106,29 +90,57 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const showToast = (message, type = 'success') => {
-    setToast({ message, type });
-  };
+  // Support URL view parameter for automated visual testing and screenshots
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const view = params.get('view');
+      if (view === 'add-task') {
+        setIsFormOpen(true);
+        setEditingTask(null);
+      } else if (view === 'edit-task') {
+        if (tasks && tasks.length > 0) {
+          setEditingTask(tasks[0]);
+          setIsFormOpen(true);
+        }
+      } else if (view === 'search-filter-sort') {
+        setSearchQuery('Task');
+        setStatusFilter('pending');
+        setPriorityFilter('high');
+        setSortBy('dueDate');
+      } else if (view === 'empty-state') {
+        setSearchQuery('NonExistentSearchMatchXYZ');
+      } else if (view === 'completed-task') {
+        setStatusFilter('completed');
+      }
+    } catch {
+      // Ignore in non-browser environments
+    }
+  }, [tasks]);
+
+  const showToast = useCallback((message, type = 'success') => {
+    setToast({ message, type, id: Date.now() });
+  }, []);
 
   // ---------------------------------------------------------------------------
-  // 3. CRUD HANDLERS
+  // 2. CRUD HANDLERS
   // ---------------------------------------------------------------------------
-  const handleOpenAddModal = () => {
+  const handleOpenAddModal = useCallback(() => {
     setEditingTask(null);
     setIsFormOpen(true);
-  };
+  }, []);
 
-  const handleOpenEditModal = (task) => {
+  const handleOpenEditModal = useCallback((task) => {
     setEditingTask(task);
     setIsFormOpen(true);
-  };
+  }, []);
 
-  const handleCloseFormModal = () => {
+  const handleCloseFormModal = useCallback(() => {
     setIsFormOpen(false);
     setEditingTask(null);
-  };
+  }, []);
 
-  const handleFormSubmit = (taskData) => {
+  const handleFormSubmit = useCallback((taskData) => {
     if (editingTask) {
       // EDIT EXISTING TASK
       setTasks((prev) =>
@@ -146,7 +158,7 @@ export default function App() {
     } else {
       // ADD NEW TASK
       const newTask = {
-        id: `task-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        id: `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         ...taskData,
         completed: false,
         createdAt: new Date().toISOString(),
@@ -156,10 +168,10 @@ export default function App() {
     }
 
     handleCloseFormModal();
-  };
+  }, [editingTask, handleCloseFormModal, setTasks, showToast]);
 
-  // COMPLETE / RESTORE
-  const handleToggleComplete = (taskId) => {
+  // COMPLETE / RESTORE TASK
+  const handleToggleComplete = useCallback((taskId) => {
     let newStatus = false;
     setTasks((prev) =>
       prev.map((t) => {
@@ -180,77 +192,91 @@ export default function App() {
     } else {
       showToast('Task restored to Pending.', 'info');
     }
-  };
+  }, [setTasks, showToast]);
 
   // DELETE WITH CONFIRMATION
-  const handleDeleteRequest = (task) => {
+  const handleDeleteRequest = useCallback((task) => {
     setDeleteConfirmTask(task);
-  };
+  }, []);
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = useCallback(() => {
     if (!deleteConfirmTask) return;
+    const title = deleteConfirmTask.title;
     setTasks((prev) => prev.filter((t) => t.id !== deleteConfirmTask.id));
-    showToast(`"${deleteConfirmTask.title}" has been deleted.`, 'danger');
+    showToast(`"${title}" has been deleted.`, 'danger');
     setDeleteConfirmTask(null);
-  };
+  }, [deleteConfirmTask, setTasks, showToast]);
 
-  const handleCancelDelete = () => {
+  const handleCancelDelete = useCallback(() => {
     setDeleteConfirmTask(null);
-  };
+  }, []);
 
-  // RESET FILTERS
-  const handleResetFilters = () => {
+  // RESET FILTERS & SORT
+  const handleResetFilters = useCallback(() => {
     setSearchQuery('');
-    setActiveFilter('all');
-  };
+    setStatusFilter('all');
+    setPriorityFilter('all');
+    setSortBy('newest');
+  }, []);
+
+  // DASHBOARD CARD FILTER SHORTCUT
+  const handleDashboardFilter = useCallback((status, priority = 'all') => {
+    setStatusFilter(status);
+    setPriorityFilter(priority);
+  }, []);
 
   // ---------------------------------------------------------------------------
-  // 4. COMPUTED METRICS & FILTERING (Memoized)
+  // 3. COMPUTED METRICS, FILTERING & SORTING (Optimized Memoization)
   // ---------------------------------------------------------------------------
+  // Metrics for dashboard counters
   const stats = useMemo(() => {
     const total = tasks.length;
-    const pending = tasks.filter((t) => !t.completed).length;
-    const completed = tasks.filter((t) => t.completed).length;
-    const highPriority = tasks.filter((t) => t.priority === 'High').length;
+    let pending = 0;
+    let completed = 0;
+    let highPriority = 0;
+
+    for (let i = 0; i < tasks.length; i++) {
+      const task = tasks[i];
+      if (task.completed) {
+        completed += 1;
+      } else {
+        pending += 1;
+      }
+      if (task.priority === 'High') {
+        highPriority += 1;
+      }
+    }
+
     return { total, pending, completed, highPriority };
   }, [tasks]);
 
+  // Dynamic filter counts for filter badges
   const filterCounts = useMemo(() => {
-    return {
-      all: tasks.length,
-      pending: tasks.filter((t) => !t.completed).length,
-      completed: tasks.filter((t) => t.completed).length,
-      high: tasks.filter((t) => t.priority === 'High').length,
-      medium: tasks.filter((t) => t.priority === 'Medium').length,
-      low: tasks.filter((t) => t.priority === 'Low').length,
-    };
+    return calculateFilterCounts(tasks);
   }, [tasks]);
 
+  // Combined Search + Status + Priority filtering (derived from state without data mutation)
   const filteredTasks = useMemo(() => {
-    return tasks.filter((task) => {
-      // 1. Priority/Status Filter
-      if (activeFilter === 'pending' && task.completed) return false;
-      if (activeFilter === 'completed' && !task.completed) return false;
-      if (activeFilter === 'high' && task.priority !== 'High') return false;
-      if (activeFilter === 'medium' && task.priority !== 'Medium') return false;
-      if (activeFilter === 'low' && task.priority !== 'Low') return false;
-
-      // 2. Search Query (matches Title or Description)
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
-        const titleMatch = task.title?.toLowerCase().includes(query);
-        const descMatch = task.description?.toLowerCase().includes(query);
-        return titleMatch || descMatch;
-      }
-
-      return true;
+    return filterTasks(tasks, {
+      searchQuery,
+      statusFilter,
+      priorityFilter,
     });
-  }, [tasks, activeFilter, searchQuery]);
+  }, [tasks, searchQuery, statusFilter, priorityFilter]);
 
-  const hasActiveFilters = searchQuery.trim() !== '' || activeFilter !== 'all';
+  // Sorting applied on filtered results
+  const visibleTasks = useMemo(() => {
+    return sortTasks(filteredTasks, sortBy);
+  }, [filteredTasks, sortBy]);
+
+  const hasActiveFilters =
+    searchQuery.trim() !== '' ||
+    statusFilter !== 'all' ||
+    priorityFilter !== 'all' ||
+    sortBy !== 'newest';
 
   // ---------------------------------------------------------------------------
-  // 5. RENDER
+  // 4. RENDER
   // ---------------------------------------------------------------------------
   return (
     <div className="app-wrapper">
@@ -258,31 +284,41 @@ export default function App() {
       <Header onOpenAddModal={handleOpenAddModal} />
 
       {/* Main Container */}
-      <main className="main-content">
+      <main className="main-content" id="main-content">
         {/* Dashboard Statistics */}
-        <Dashboard stats={stats} onSelectFilter={(filterKey) => setActiveFilter(filterKey)} />
+        <Dashboard
+          stats={stats}
+          statusFilter={statusFilter}
+          priorityFilter={priorityFilter}
+          onSelectFilter={handleDashboardFilter}
+        />
 
-        {/* Search and Filters Section */}
-        <section className="controls-section" aria-label="Search and Filter Controls">
+        {/* Search, Filter, and Sorting Controls */}
+        <section className="controls-section" aria-label="Search, filter, and sorting toolbar">
           <SearchBar
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             onClearSearch={() => setSearchQuery('')}
           />
           <FilterBar
-            activeFilter={activeFilter}
-            onFilterChange={setActiveFilter}
+            statusFilter={statusFilter}
+            onStatusFilterChange={setStatusFilter}
+            priorityFilter={priorityFilter}
+            onPriorityFilterChange={setPriorityFilter}
+            sortBy={sortBy}
+            onSortChange={setSortBy}
             counts={filterCounts}
             hasActiveFilters={hasActiveFilters}
             onResetFilters={handleResetFilters}
           />
         </section>
 
-        {/* Task List / Cards */}
+        {/* Task List / Grid with Contextual Empty States */}
         <TaskList
-          tasks={filteredTasks}
+          tasks={visibleTasks}
           totalTaskCount={tasks.length}
-          activeFilter={activeFilter}
+          statusFilter={statusFilter}
+          priorityFilter={priorityFilter}
           searchQuery={searchQuery}
           onToggleComplete={handleToggleComplete}
           onEdit={handleOpenEditModal}
@@ -311,9 +347,9 @@ export default function App() {
           aria-modal="true"
           aria-labelledby="delete-dialog-title"
         >
-          <div className="modal-content" style={{ maxWidth: '440px' }}>
+          <div className="modal-content delete-modal-content">
             <div className="delete-modal-body">
-              <div className="delete-icon-box">
+              <div className="delete-icon-box" aria-hidden="true">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 6h18"/>
                   <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
@@ -326,14 +362,14 @@ export default function App() {
                 Delete Task?
               </h3>
               <p className="delete-description">
-                Are you sure you want to delete this task? This action cannot be undone.
+                Are you sure you want to delete this task? This action is permanent and cannot be undone.
               </p>
-              <div className="delete-task-preview">
+              <div className="delete-task-preview" title={deleteConfirmTask.title}>
                 "{deleteConfirmTask.title}"
               </div>
             </div>
 
-            <div className="modal-footer" style={{ justifyContent: 'center' }}>
+            <div className="modal-footer delete-modal-footer">
               <button
                 type="button"
                 className="btn btn-outline"
@@ -354,30 +390,41 @@ export default function App() {
         </div>
       )}
 
-      {/* Toast Feedback Notification */}
+      {/* Toast Feedback Notifications */}
       {toast && (
         <div className="toast-container" role="status" aria-live="polite">
           <div className={`toast-message ${toast.type}`}>
             {toast.type === 'success' && (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <polyline points="20 6 9 17 4 12"/>
               </svg>
             )}
             {toast.type === 'info' && (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="10"/>
                 <line x1="12" y1="16" x2="12" y2="12"/>
                 <line x1="12" y1="8" x2="12.01" y2="8"/>
               </svg>
             )}
             {toast.type === 'danger' && (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="10"/>
                 <line x1="15" y1="9" x2="9" y2="15"/>
                 <line x1="9" y1="9" x2="15" y2="15"/>
               </svg>
             )}
             <span>{toast.message}</span>
+            <button
+              type="button"
+              className="toast-close-btn"
+              onClick={() => setToast(null)}
+              aria-label="Dismiss notification"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
           </div>
         </div>
       )}

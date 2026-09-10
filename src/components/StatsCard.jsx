@@ -1,14 +1,13 @@
-import React from 'react';
+import React, { memo } from 'react';
 
 /**
- * StatsCard Component
- * Displays a metric with icon, title, counter value, and subtle descriptive subtext.
- * Can be clicked to quickly switch filters.
+ * StatsCard Component — Phase 2
+ * Displays a metric with icon, title, counter value, descriptive subtext, and active state indicator.
  */
-export default function StatsCard({ title, value, subtext, type = 'total', icon, onClick }) {
+function StatsCard({ title, value, subtext, type = 'total', icon, onClick, isActive = false }) {
   return (
     <div
-      className={`stats-card ${type}`}
+      className={`stats-card ${type} ${isActive ? 'is-active' : ''}`}
       onClick={onClick}
       role={onClick ? 'button' : 'region'}
       tabIndex={onClick ? 0 : undefined}
@@ -19,7 +18,8 @@ export default function StatsCard({ title, value, subtext, type = 'total', icon,
         }
       }}
       style={{ cursor: onClick ? 'pointer' : 'default' }}
-      aria-label={`${title}: ${value}`}
+      aria-label={`${title}: ${value}. ${subtext}`}
+      aria-pressed={onClick ? isActive : undefined}
     >
       <div className="stats-card-top">
         <span className="stats-card-title">{title}</span>
@@ -32,3 +32,5 @@ export default function StatsCard({ title, value, subtext, type = 'total', icon,
     </div>
   );
 }
+
+export default memo(StatsCard);
