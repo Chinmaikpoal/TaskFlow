@@ -172,11 +172,13 @@ export default function App() {
 
   // COMPLETE / RESTORE TASK
   const handleToggleComplete = useCallback((taskId) => {
-    let newStatus = false;
+    const targetTask = tasks.find((t) => t.id === taskId);
+    if (!targetTask) return;
+    const newStatus = !targetTask.completed;
+
     setTasks((prev) =>
       prev.map((t) => {
         if (t.id === taskId) {
-          newStatus = !t.completed;
           return {
             ...t,
             completed: newStatus,
@@ -192,7 +194,7 @@ export default function App() {
     } else {
       showToast('Task restored to Pending.', 'info');
     }
-  }, [setTasks, showToast]);
+  }, [tasks, setTasks, showToast]);
 
   // DELETE WITH CONFIRMATION
   const handleDeleteRequest = useCallback((task) => {
